@@ -156,7 +156,7 @@ export default function App() {
             {tab === "scout"       && <ScoutOpponent />}
             {tab === "intel"       && <IntelCenter />}
             {tab === "coach"       && <AICoach />}
-            {tab === "playbuilder" && <PlayBuilder />}
+            {tab === "playbuilder" && <PlayBuilder onAddToBot={() => {}} />}
             {tab === "coverage"    && <CoverageLab />}
             {tab === "meta"        && <MetaCenter />}
           </div>

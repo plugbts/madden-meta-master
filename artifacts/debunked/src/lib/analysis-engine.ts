@@ -246,7 +246,7 @@ export function getCoachAdvice(input: CoachInput): CoachAdvice {
     cov.tells.forEach(t => presnap.push(`Tell: ${t}`));
   }
   if (situationalPlays.length > 0) {
-    presnap.push(`Situational note: ${situationalPlays[0]?.whyItWorks ?? ""}`);
+    presnap.push(`Situational note: ${(situationalPlays[0] as Record<string, unknown>)?.["whyItWorks"] ?? ""}`);
   }
 
   const narrative = buildCoachNarrative(finding, input.situation, input.downDistance);
