@@ -1,0 +1,296 @@
+OPPONENT INTELLIGENCE & PERSISTENCE SYSTEM
+
+OBJECTIVE
+
+Implement a persistent scouting database that continuously builds intelligence across multiple games. Every analyzed snap should contribute to long-term opponent profiles, user profiles, and learning systems.
+
+This is not simply “saving data.” It is the foundation for the Madden Intelligence Engine.
+
+⸻
+
+MULTI-LAYER PERSISTENCE
+
+Implement three persistence layers.
+
+Layer 1 — Session Persistence
+
+Purpose:
+Prevent data loss during active analysis.
+
+Persist:
+
+* Current upload
+* Current analysis progress
+* Current snap index
+* User corrections
+* Pending reports
+* Analysis settings
+
+Refreshing the page should never lose an active session.
+
+⸻
+
+Layer 2 — Local Persistence
+
+Store all completed analyses locally for fast access.
+
+Persist:
+
+* Snap logs
+* Reports
+* AI findings
+* User corrections
+* Confidence scores
+* Opponent profiles
+* User profiles
+
+Previously analyzed games should load instantly without rebuilding everything.
+
+⸻
+
+Layer 3 — Cloud Persistence
+
+When authentication is available, synchronize all scouting data.
+
+Cloud storage becomes the permanent source of truth while local storage acts as a high-speed cache.
+
+⸻
+
+SNAP DATABASE
+
+Every analyzed snap should be permanently stored.
+
+Required fields:
+
+* Game ID
+* Opponent ID
+* Timestamp
+* Quarter
+* Down
+* Distance
+* Field Position
+* Offense / Defense
+* Offensive Formation
+* Defensive Formation
+* Base Play
+* Coverage
+* Coverage Shell
+* Blitz Package
+* Defensive Adjustments
+* Offensive Motion
+* Route Concepts
+* User Controlled Defender
+* Pressure Type
+* Play Result
+* Yards Gained
+* Turnover
+* Sack
+* Confidence Scores
+* User Corrections
+
+Never discard analyzed snaps.
+
+⸻
+
+OPPONENT PROFILE
+
+Automatically build a cumulative profile for every opponent.
+
+Track:
+
+* Games analyzed
+* Total snaps
+* Favorite formations
+* Favorite concepts
+* Favorite coverages
+* Favorite blitzes
+* Run percentage
+* Pass percentage
+* Motion frequency
+* User defender preference
+* Preferred shells
+* Preferred adjustments
+* Red zone tendencies
+* Third down tendencies
+* Fourth down tendencies
+* Two-point tendencies
+* Audible frequency
+* Hot route frequency
+
+Update these statistics after every completed analysis.
+
+⸻
+
+TREND ENGINE
+
+Do not only store lifetime statistics.
+
+Also calculate:
+
+* Last Game
+* Last 3 Games
+* Last 5 Games
+* Last 10 Games
+* Lifetime
+
+Detect changes automatically.
+
+Example:
+
+Previous:
+Mid Blitz 41%
+
+Recent:
+Mid Blitz 14%
+
+Cover 4 37%
+
+Insight:
+
+Opponent appears to be transitioning away from Mid Blitz toward Cover 4 concepts.
+
+⸻
+
+COUNTER HISTORY
+
+Track which counters have historically worked.
+
+Example:
+
+Flood vs Cover 4
+
+Games:
+23
+
+Success Rate:
+81%
+
+Average Yards:
+14.2
+
+Confidence:
+High
+
+The recommendation engine should prioritize counters supported by historical evidence.
+
+⸻
+
+SELF LEARNING DATABASE
+
+Every corrected analysis should improve the platform.
+
+Store:
+
+AI Prediction
+
+User Correction
+
+Correction Frequency
+
+Confidence Before
+
+Confidence After
+
+Corrections become training data for future recognition improvements.
+
+⸻
+
+LOCAL CACHE
+
+Automatically cache:
+
+* Opponent profiles
+* Recent reports
+* Recent games
+* Frequently accessed scouting data
+
+The app should feel instant when reopening previously analyzed opponents.
+
+⸻
+
+PLAYER SCOUTING
+
+If the same opponent is analyzed multiple times, automatically generate a persistent scouting report.
+
+Example:
+
+Opponent:
+Player123
+
+Games:
+12
+
+Snaps:
+724
+
+Favorite Formation:
+Gun Bunch
+
+Favorite Coverage:
+Mid Blitz
+
+Favorite User:
+Middle Linebacker
+
+Run:
+34%
+
+Pass:
+66%
+
+Weakness:
+Frequently vacates the running back while usering the MLB.
+
+Best Historical Counters:
+
+★★★★★ Flood
+
+★★★★★ Wheel
+
+★★★★ Mesh
+
+This report should automatically improve after every analyzed game.
+
+⸻
+
+ARCHITECTURE
+
+Game
+
+↓
+
+Snaps
+
+↓
+
+Database
+
+↓
+
+Opponent Profile
+
+↓
+
+Trend Engine
+
+↓
+
+Counter Engine
+
+↓
+
+AI Report
+
+The database is the source of truth.
+
+Reports are generated from the database, not the other way around.
+
+⸻
+
+GOAL
+
+Transform every uploaded game into permanent football intelligence.
+
+The more games analyzed, the smarter the platform becomes.
+
+Every snap should strengthen future scouting reports, tendency detection, counter recommendations, coaching insights, and money play generation.

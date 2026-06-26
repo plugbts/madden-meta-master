@@ -6,26 +6,28 @@ import { AICoach } from "@/components/AICoach";
 import { PlayBuilder } from "@/components/PlayBuilder";
 import { CoverageLab } from "@/components/CoverageLab";
 import { MetaCenter } from "@/components/MetaCenter";
+import { IntelCenter } from "@/components/IntelCenter";
 
 type View = "home" | "app";
-type Tab = "film" | "scout" | "coach" | "playbuilder" | "coverage" | "meta";
+type Tab = "film" | "scout" | "coach" | "playbuilder" | "coverage" | "meta" | "intel";
 
 const TABS: Array<{ id: Tab; label: string; badge?: string; desc: string; accent: string }> = [
-  { id: "film",        label: "Analyze Film",   desc: "Log snaps. Get counters.",      accent: "#78b4ff" },
-  { id: "scout",       label: "Scout Opponent", desc: "Build a scouting report.",       accent: "#ffc84a" },
-  { id: "coach",       label: "AI Coach",       desc: "In-game call recommendations.",  accent: "#6fdba8" },
-  { id: "playbuilder", label: "Play Builder",   desc: "Design route concepts.",         accent: "#78b4ff", badge: "LAB" },
-  { id: "coverage",    label: "Coverage Lab",   desc: "Learn every coverage shell.",    accent: "#e07fff" },
-  { id: "meta",        label: "Meta Center",    desc: "What's dominating ranked.",      accent: "#ffc84a" },
+  { id: "film",        label: "Analyze Film",   desc: "Log snaps. Get counters.",           accent: "#78b4ff" },
+  { id: "scout",       label: "Scout Opponent", desc: "Build a scouting report.",            accent: "#ffc84a" },
+  { id: "intel",       label: "Intel",          desc: "Persistent opponent intelligence.",   accent: "#6fdba8", badge: "DB" },
+  { id: "coach",       label: "AI Coach",       desc: "In-game call recommendations.",       accent: "#6fdba8" },
+  { id: "playbuilder", label: "Play Builder",   desc: "Design route concepts.",              accent: "#78b4ff", badge: "LAB" },
+  { id: "coverage",    label: "Coverage Lab",   desc: "Learn every coverage shell.",         accent: "#e07fff" },
+  { id: "meta",        label: "Meta Center",    desc: "What's dominating ranked.",           accent: "#ffc84a" },
 ];
 
-const HEADER_BG  = "rgba(0,0,0,0.82)";
-const NAV_BG     = "rgba(0,0,0,0.75)";
-const BLUR       = "blur(24px)";
+const HEADER_BG = "rgba(0,0,0,0.82)";
+const NAV_BG    = "rgba(0,0,0,0.75)";
+const BLUR      = "blur(24px)";
 
 export default function App() {
   const [view, setView] = useState<View>("home");
-  const [tab, setTab] = useState<Tab>("film");
+  const [tab, setTab]   = useState<Tab>("film");
 
   if (view === "home") {
     return <Home onEnter={() => setView("app")} />;
@@ -152,6 +154,7 @@ export default function App() {
           <div className="relative z-10">
             {tab === "film"        && <FilmHub />}
             {tab === "scout"       && <ScoutOpponent />}
+            {tab === "intel"       && <IntelCenter />}
             {tab === "coach"       && <AICoach />}
             {tab === "playbuilder" && <PlayBuilder />}
             {tab === "coverage"    && <CoverageLab />}
@@ -163,7 +166,7 @@ export default function App() {
         <footer style={{ borderTop: "1px solid rgba(255,255,255,0.05)", padding: "1rem 0" }}>
           <div className="mx-auto max-w-5xl px-4 sm:px-6">
             <p className="text-center font-mono text-[10px] uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.22)" }}>
-              DEBUNKED. · Knowledge Engine v2 · All analysis runs locally
+              DEBUNKED. · Intelligence Engine v3 · All data stored locally
             </p>
           </div>
         </footer>
