@@ -351,15 +351,24 @@ export type CoverageScore = {
   contradictingSignals: { id: SignalId; name: string; penalty: number }[];
 };
 
+// Confidence thresholds for gated output
+export const RECOGNITION_MIN_CONFIDENCE = 30;  // below this → "Unknown"
+export const RECOGNITION_AMBIGUITY_GAP  = 12;  // gap < this between #1/#2 → "Multiple Possibilities"
+
+export type CoverageConclusion = CoverageFamily | "Unknown" | "Multiple Possibilities";
+
 export type RecognitionResult = {
   id: string;
   timestamp: number;
   input: RecognitionInput;
-  scores: CoverageScore[];        // sorted by probability desc
+  scores: CoverageScore[];               // sorted by probability desc
   topCoverage: CoverageFamily;
   topProbability: number;
-  isAmbiguous: boolean;           // true if top two are within 15% of each other
-  aiPayload: CoverageAiPayload;   // structured for downstream AI processing
+  isAmbiguous: boolean;                  // true if top two are within RECOGNITION_AMBIGUITY_GAP
+  isLowConfidence: boolean;              // true if topProbability < RECOGNITION_MIN_CONFIDENCE
+  coverageConclusion: CoverageConclusion; // gated output — "Unknown" / "Multiple Possibilities" / specific family
+  evidenceTrace: string[];               // human-readable list of signals that drove the top prediction
+  aiPayload: CoverageAiPayload;          // structured for downstream AI processing
 };
 
 /** Structured payload ready for AI consumption — no presentation concerns. */
@@ -370,7 +379,9 @@ export type CoverageAiPayload = {
   context: RecognitionContext;
   coverageDistribution: { family: CoverageFamily; probability: number; variants: string[] }[];
   topCoverage: { family: CoverageFamily; label: string; probability: number };
+  coverageConclusion: CoverageConclusion;
   isAmbiguous: boolean;
+  isLowConfidence: boolean;
   evidenceSummary: string[];
 };
 
@@ -441,9 +452,23 @@ export function recognizeCoverage(input: RecognitionInput): RecognitionResult {
       contradictingSignals: contradictMap[family],
     }));
 
-  const topCoverage = scores[0].family;
+  const topCoverage    = scores[0].family;
   const topProbability = scores[0].probability;
-  const isAmbiguous = scores.length >= 2 && (topProbability - scores[1].probability) <= 15;
+  const isAmbiguous    = scores.length >= 2 && (topProbability - scores[1].probability) <= RECOGNITION_AMBIGUITY_GAP;
+  const isLowConfidence = topProbability < RECOGNITION_MIN_CONFIDENCE;
+
+  // ── Gated conclusion ──────────────────────────────────────────────────────
+  let coverageConclusion: CoverageConclusion;
+  if (isLowConfidence) {
+    coverageConclusion = "Unknown";
+  } else if (isAmbiguous) {
+    coverageConclusion = "Multiple Possibilities";
+  } else {
+    coverageConclusion = topCoverage;
+  }
+
+  // ── Evidence trace ────────────────────────────────────────────────────────
+  const evidenceTrace = buildEvidenceTrace(signals, scores[0]);
 
   const observedSignals = signals
     .map((id) => REGISTRY_MAP.get(id))
@@ -451,26 +476,29 @@ export function recognizeCoverage(input: RecognitionInput): RecognitionResult {
     .map((s) => ({ id: s!.id, category: s!.category, name: s!.name }));
 
   const aiPayload: CoverageAiPayload = {
-    schemaVersion: "coverage-recognition/v1",
-    timestamp: Date.now(),
+    schemaVersion:       "coverage-recognition/v1",
+    timestamp:           Date.now(),
     observedSignals,
     context,
-    coverageDistribution: scores.map(({ family, probability, variants }) => ({
-      family, probability, variants,
-    })),
-    topCoverage: { family: topCoverage, label: COVERAGE_FAMILY_LABELS[topCoverage], probability: topProbability },
+    coverageDistribution: scores.map(({ family, probability, variants }) => ({ family, probability, variants })),
+    topCoverage:          { family: topCoverage, label: COVERAGE_FAMILY_LABELS[topCoverage], probability: topProbability },
+    coverageConclusion,
     isAmbiguous,
-    evidenceSummary: buildEvidenceSummary(signals, scores),
+    isLowConfidence,
+    evidenceSummary:      buildEvidenceSummary(signals, scores),
   };
 
   return {
-    id: `crec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    timestamp: Date.now(),
+    id:               `crec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    timestamp:        Date.now(),
     input,
     scores,
     topCoverage,
     topProbability,
     isAmbiguous,
+    isLowConfidence,
+    coverageConclusion,
+    evidenceTrace,
     aiPayload,
   };
 }
@@ -545,6 +573,30 @@ function deriveVariants(family: CoverageFamily, signals: SignalId[]): string[] {
     return allVariants;
   }
   return allVariants;
+}
+
+function buildEvidenceTrace(signals: SignalId[], top: CoverageScore): string[] {
+  const trace: string[] = [];
+  if (top.supportingSignals.length === 0) {
+    trace.push("No direct supporting signals recorded — prediction driven by baseline priors only.");
+    return trace;
+  }
+  for (const sig of top.supportingSignals.slice(0, 4)) {
+    const signal = REGISTRY_MAP.get(sig.id);
+    if (signal) {
+      trace.push(`${signal.name}: ${signal.description} → +${sig.contribution} pts toward ${top.label}`);
+    }
+  }
+  if (top.contradictingSignals.length > 0) {
+    const top3 = top.contradictingSignals.slice(0, 2);
+    for (const sig of top3) {
+      const signal = REGISTRY_MAP.get(sig.id);
+      if (signal) {
+        trace.push(`⚠ ${signal.name}: contradicts ${top.label} (−${sig.penalty} pts)`);
+      }
+    }
+  }
+  return trace;
 }
 
 function buildEvidenceSummary(signals: SignalId[], scores: CoverageScore[]): string[] {

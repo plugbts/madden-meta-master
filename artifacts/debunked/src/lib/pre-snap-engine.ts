@@ -1,48 +1,84 @@
 // ─── Pre-Snap Recognition Engine ─────────────────────────────────────────────
-// Pure logic layer — no React, no side effects. All functions are deterministic.
+// Evidence-first architecture: observable signals → feature detection → inference.
+// Every prediction is traceable to the evidence that produced it.
+// Low-confidence outputs return "Unknown" or "Multiple Possibilities" — never invented.
 
-// ─── Input Types ─────────────────────────────────────────────────────────────
+// ─── Confidence Thresholds ────────────────────────────────────────────────────
 
-export type SafetyDepth = "Deep (15+ yds)" | "Mid (8-12 yds)" | "Shallow (5-7 yds)" | "In the box";
-export type SafetySpacing = "Split wide" | "Centerfield" | "Rotated strong" | "Rotated weak";
-export type CBLeverage = "Press (0-2 yds)" | "Off-man (3-5 yds)" | "Cushion (7+ yds)" | "Inside shade" | "Outside shade";
-export type NickelAlignment = "Normal" | "Mugged / walked up" | "Walked out wide" | "Blitz look";
-export type SlotDefender = "Playing zone" | "Playing man" | "Walked up tight";
-export type LBDepth = "Deep (8+ yds)" | "Normal (4-7 yds)" | "Mugged (0-3 yds)" | "A-gap shade";
-export type LBSpacing = "Wide" | "Normal" | "Pinched";
-export type DLAlignment = "Normal" | "Over (shifted strong)" | "Under (shifted weak)" | "Wide (pass rush)";
-export type UserPosition = "FS" | "SS" | "LB" | "CB" | "None visible";
-export type DefAdjustment = "None" | "Pinch" | "Spread" | "Press all" | "Cushion all" | "Shade inside" | "Shade outside" | "Over top";
-export type BlitzLook = "None" | "A-gap shade" | "Edge walk-up" | "DB walked down" | "Multiple walk-ups";
+const COVERAGE_MIN_CONFIDENCE   = 35;  // Below this → output "Unknown"
+const COVERAGE_AMBIGUITY_GAP    = 12;  // Gap < this between #1/#2 → "Multiple Possibilities"
+const USER_MIN_CONFIDENCE       = 55;  // Below this → user position stays "Unknown"
+
+// ─── Input Types ──────────────────────────────────────────────────────────────
+
+export type SafetyDepth    = "Deep (15+ yds)" | "Mid (8-12 yds)" | "Shallow (5-7 yds)" | "In the box";
+export type SafetySpacing  = "Split wide" | "Centerfield" | "Rotated strong" | "Rotated weak";
+export type CBLeverage     = "Press (0-2 yds)" | "Off-man (3-5 yds)" | "Cushion (7+ yds)" | "Inside shade" | "Outside shade";
+export type NickelAlignment= "Normal" | "Mugged / walked up" | "Walked out wide" | "Blitz look";
+export type SlotDefender   = "Playing zone" | "Playing man" | "Walked up tight";
+export type LBDepth        = "Deep (8+ yds)" | "Normal (4-7 yds)" | "Mugged (0-3 yds)" | "A-gap shade";
+export type LBSpacing      = "Wide" | "Normal" | "Pinched";
+export type DLAlignment    = "Normal" | "Over (shifted strong)" | "Under (shifted weak)" | "Wide (pass rush)";
+export type UserPosition   = "FS" | "SS" | "LB" | "CB" | "None visible";
+export type DefAdjustment  = "None" | "Pinch" | "Spread" | "Press all" | "Cushion all" | "Shade inside" | "Shade outside" | "Over top";
+export type BlitzLook      = "None" | "A-gap shade" | "Edge walk-up" | "DB walked down" | "Multiple walk-ups";
+
+// ─── User Observable Evidence ─────────────────────────────────────────────────
+// The user-controlled defender must be detected from observable signals.
+// The engine must NOT infer or guess the position — only classify when evidence is sufficient.
+
+export type UserObservableEvidence =
+  | "user_icon_visible"    // Yellow crown/indicator icon seen above a specific defender
+  | "manual_presnap_move"  // Defender repositioned manually before the snap
+  | "manual_strafing"      // Defender strafing/moving laterally pre-snap by user
+  | "manual_rush_path"     // Post-snap rush path that is unnatural / clearly user-directed
+  | "continuous_input"     // Erratic movement pattern consistent with live user control
+  | "none";                // No observable evidence — do not assign a position
+
+export type UserDetectionConfidence = "High" | "Medium" | "Low";
+
+export type UserDetectionResult = {
+  position:            UserPosition | "Unknown";
+  location:            string | null;
+  confidenceScore:     number;                   // 0-100
+  confidence:          UserDetectionConfidence;
+  evidenceUsed:        string[];
+  insufficientEvidence: boolean;
+};
+
+// ─── Pre-Snap Inputs ──────────────────────────────────────────────────────────
 
 export type PreSnapInputs = {
-  safetyDepth: SafetyDepth;
-  safetySpacing: SafetySpacing;
-  cbLeverage: CBLeverage;
-  nickelAlignment: NickelAlignment;
-  slotDefender: SlotDefender;
-  lbDepth: LBDepth;
-  lbSpacing: LBSpacing;
-  dlAlignment: DLAlignment;
-  userPosition: UserPosition;
-  adjustment: DefAdjustment;
-  blitzLook: BlitzLook;
-  situationDown?: number;
-  situationYards?: number;
+  safetyDepth:            SafetyDepth;
+  safetySpacing:          SafetySpacing;
+  cbLeverage:             CBLeverage;
+  nickelAlignment:        NickelAlignment;
+  slotDefender:           SlotDefender;
+  lbDepth:                LBDepth;
+  lbSpacing:              LBSpacing;
+  dlAlignment:            DLAlignment;
+  userPosition:           UserPosition;                   // legacy field — kept for backward compat
+  userEvidence?:          UserObservableEvidence[];        // what you directly observed
+  userSuspectedPosition?: UserPosition | "Unknown";        // position (only valid with evidence)
+  adjustment:             DefAdjustment;
+  blitzLook:              BlitzLook;
+  situationDown?:         number;
+  situationYards?:        number;
 };
 
 export const DEFAULT_INPUTS: PreSnapInputs = {
-  safetyDepth: "Deep (15+ yds)",
-  safetySpacing: "Split wide",
-  cbLeverage: "Off-man (3-5 yds)",
-  nickelAlignment: "Normal",
-  slotDefender: "Playing zone",
-  lbDepth: "Normal (4-7 yds)",
-  lbSpacing: "Normal",
-  dlAlignment: "Normal",
-  userPosition: "None visible",
-  adjustment: "None",
-  blitzLook: "None",
+  safetyDepth:    "Deep (15+ yds)",
+  safetySpacing:  "Split wide",
+  cbLeverage:     "Off-man (3-5 yds)",
+  nickelAlignment:"Normal",
+  slotDefender:   "Playing zone",
+  lbDepth:        "Normal (4-7 yds)",
+  lbSpacing:      "Normal",
+  dlAlignment:    "Normal",
+  userPosition:   "None visible",
+  userEvidence:   ["none"],
+  adjustment:     "None",
+  blitzLook:      "None",
 };
 
 // ─── Output Types ─────────────────────────────────────────────────────────────
@@ -56,75 +92,176 @@ export type Shell = "Single High" | "Two High" | "Quarters Shell" | "Cover 0 She
 
 export type CoverageConfidence = { coverage: Coverage; confidence: number };
 
+// Gated conclusion — only emits a specific coverage when evidence is sufficient
+export type CoverageConclusion = Coverage | "Unknown" | "Multiple Possibilities";
+
 export type DisguiseFlag = {
-  shellShown: Shell;
+  shellShown:     Shell;
   likelyCoverage: Coverage;
-  probability: number;
-  indicator: string;
+  probability:    number;
+  indicator:      string;
 };
 
 export type AttackRecommendation = {
-  concept: string;
+  concept:    string;
   confidence: number;
-  formation: string;
-  reasoning: string;
-  routes: string[];
-  motions: string[];
+  formation:  string;
+  reasoning:  string;
+  routes:     string[];
+  motions:    string[];
 };
 
 export type PreSnapAnalysis = {
-  shell: Shell;
-  shellConfidence: number;
-  topCoverage: Coverage;
-  topConfidence: number;
-  coverageBreakdown: CoverageConfidence[];
-  disguises: DisguiseFlag[];
-  adjustmentImpact: string;
-  blitzProbability: number;
-  recommendations: AttackRecommendation[];
-  reasoning: string[];
+  shell:              Shell;
+  shellConfidence:    number;
+  topCoverage:        Coverage;          // best-guess coverage (backward compat)
+  topConfidence:      number;            // normalized % for top coverage
+  coverageConclusion: CoverageConclusion; // gated output: Unknown / Multiple Possibilities / specific coverage
+  isLowConfidence:    boolean;           // true when top < COVERAGE_MIN_CONFIDENCE
+  isAmbiguous:        boolean;           // true when top two are within COVERAGE_AMBIGUITY_GAP
+  coverageBreakdown:  CoverageConfidence[];
+  evidenceTrail:      string[];          // per-signal human-readable evidence chain
+  disguises:          DisguiseFlag[];
+  adjustmentImpact:   string;
+  blitzProbability:   number;
+  recommendations:    AttackRecommendation[];
+  reasoning:          string[];
+  userDetection:      UserDetectionResult;
+};
+
+// ─── User Controlled Defender Detection ───────────────────────────────────────
+// Must not infer or guess — only classify when observable evidence is sufficient.
+// Returns "Unknown" with Low confidence if evidence is insufficient.
+
+export function detectUserControlledDefender(params: {
+  evidenceObserved?: UserObservableEvidence[];
+  suspectedPosition?: UserPosition | "Unknown";
+  legacyPosition?: UserPosition;
+}): UserDetectionResult {
+  const { evidenceObserved = [], suspectedPosition, legacyPosition } = params;
+
+  const evidenceFiltered = evidenceObserved.filter((e): e is Exclude<UserObservableEvidence, "none"> => e !== "none");
+
+  // No direct evidence provided — check legacy fallback
+  if (evidenceFiltered.length === 0) {
+    if (legacyPosition && legacyPosition !== "None visible") {
+      return {
+        position:            legacyPosition,
+        location:            USER_LOCATION_MAP[legacyPosition] ?? null,
+        confidenceScore:     40,
+        confidence:          "Low",
+        evidenceUsed:        ["Position reported without direct observable evidence (legacy log)"],
+        insufficientEvidence: true,
+      };
+    }
+    return {
+      position:            "Unknown",
+      location:            null,
+      confidenceScore:     0,
+      confidence:          "Low",
+      evidenceUsed:        [],
+      insufficientEvidence: true,
+    };
+  }
+
+  const evidenceUsed: string[] = [];
+  let score = 0;
+
+  if (evidenceFiltered.includes("user_icon_visible")) {
+    score += 55;
+    evidenceUsed.push("User indicator icon (crown/badge) observed above defender");
+  }
+  if (evidenceFiltered.includes("manual_presnap_move")) {
+    score += 25;
+    evidenceUsed.push("Defender repositioned manually before the snap");
+  }
+  if (evidenceFiltered.includes("manual_strafing")) {
+    score += 20;
+    evidenceUsed.push("Manual lateral strafing motion observed pre-snap");
+  }
+  if (evidenceFiltered.includes("manual_rush_path")) {
+    score += 20;
+    evidenceUsed.push("Unnatural post-snap rush path consistent with user input");
+  }
+  if (evidenceFiltered.includes("continuous_input")) {
+    score += 15;
+    evidenceUsed.push("Continuous manual input movement pattern detected");
+  }
+
+  score = Math.min(score, 97);
+
+  // Need icon OR at least two behavioral signals to confirm a position
+  const hasIcon         = evidenceFiltered.includes("user_icon_visible");
+  const behavioralCount = evidenceFiltered.filter(e => e !== "user_icon_visible").length;
+  const positionConfirmed = hasIcon || behavioralCount >= 2;
+
+  if (!positionConfirmed || !suspectedPosition || suspectedPosition === "Unknown") {
+    return {
+      position:            "Unknown",
+      location:            null,
+      confidenceScore:     score,
+      confidence:          score >= 50 ? "Medium" : "Low",
+      evidenceUsed,
+      insufficientEvidence: true,
+    };
+  }
+
+  return {
+    position:            suspectedPosition,
+    location:            USER_LOCATION_MAP[suspectedPosition] ?? null,
+    confidenceScore:     score,
+    confidence:          score >= 70 ? "High" : score >= USER_MIN_CONFIDENCE ? "Medium" : "Low",
+    evidenceUsed,
+    insufficientEvidence: score < USER_MIN_CONFIDENCE,
+  };
+}
+
+const USER_LOCATION_MAP: Partial<Record<UserPosition | "Unknown", string>> = {
+  FS:  "Deep centerfield / boundary",
+  SS:  "Strong side, near box",
+  LB:  "Middle of field, linebacker depth",
+  CB:  "Outside, aligned on receiver",
 };
 
 // ─── Shell Detection ──────────────────────────────────────────────────────────
 
 function detectShell(i: PreSnapInputs): { shell: Shell; confidence: number } {
-  const deepSplit = i.safetyDepth === "Deep (15+ yds)" && i.safetySpacing === "Split wide";
+  const deepSplit  = i.safetyDepth === "Deep (15+ yds)" && i.safetySpacing === "Split wide";
   const deepCenter = i.safetyDepth === "Deep (15+ yds)" && i.safetySpacing === "Centerfield";
-  const shallow = i.safetyDepth === "Shallow (5-7 yds)" || i.safetyDepth === "In the box";
-  const press = i.cbLeverage === "Press (0-2 yds)";
-  const cushion = i.cbLeverage === "Cushion (7+ yds)";
+  const shallow    = i.safetyDepth === "Shallow (5-7 yds)" || i.safetyDepth === "In the box";
+  const press      = i.cbLeverage  === "Press (0-2 yds)";
+  const cushion    = i.cbLeverage  === "Cushion (7+ yds)";
 
-  if (i.blitzLook !== "None" && shallow) return { shell: "Cover 0 Shell", confidence: 88 };
-  if (press && shallow) return { shell: "Cover 0 Shell", confidence: 82 };
-  if (deepSplit && i.cbLeverage === "Cushion (7+ yds)") return { shell: "Quarters Shell", confidence: 85 };
-  if (deepSplit) return { shell: "Two High", confidence: 90 };
-  if (deepCenter) return { shell: "Single High", confidence: 88 };
-  if (press) return { shell: "Press Shell", confidence: 85 };
-  if (cushion) return { shell: "Off Coverage Shell", confidence: 80 };
-  return { shell: "Single High", confidence: 65 };
+  if (i.blitzLook !== "None" && shallow)                          return { shell: "Cover 0 Shell",        confidence: 88 };
+  if (press && shallow)                                           return { shell: "Cover 0 Shell",        confidence: 82 };
+  if (deepSplit && cushion)                                       return { shell: "Quarters Shell",       confidence: 85 };
+  if (deepSplit)                                                  return { shell: "Two High",             confidence: 90 };
+  if (deepCenter)                                                 return { shell: "Single High",          confidence: 88 };
+  if (press)                                                      return { shell: "Press Shell",          confidence: 85 };
+  if (cushion)                                                    return { shell: "Off Coverage Shell",   confidence: 80 };
+  return                                                                 { shell: "Single High",          confidence: 65 };
 }
 
-// ─── Coverage Confidence Model ────────────────────────────────────────────────
+// ─── Coverage Confidence Scoring ──────────────────────────────────────────────
+// Observable signals → numeric evidence points → normalized probabilities.
+// User position is NOT used as a direct score booster — only detected position with sufficient evidence.
 
 type CoverageScore = Partial<Record<Coverage, number>>;
 
 function computeScores(i: PreSnapInputs): CoverageScore {
   const scores: CoverageScore = {};
+  const add = (c: Coverage, pts: number) => { scores[c] = (scores[c] ?? 0) + pts; };
 
-  const add = (c: Coverage, pts: number) => {
-    scores[c] = (scores[c] ?? 0) + pts;
-  };
-
-  // Safety depth signals
+  // ── Safety depth signals ──────────────────────────────────────────────────
   if (i.safetyDepth === "Deep (15+ yds)") {
     add("Cover 2 Zone", 20); add("Cover 4 Quarters", 18); add("Cover 4 Palms", 15); add("Cover 2 Tampa", 12);
     if (i.safetySpacing === "Centerfield") { add("Cover 3 Sky", 22); add("Cover 3 Buzz", 18); add("Cover 1 Robber", 14); }
-    if (i.safetySpacing === "Split wide") { add("Cover 2 Zone", 20); add("Cover 4 Quarters", 22); add("Cover 6", 10); }
+    if (i.safetySpacing === "Split wide")  { add("Cover 2 Zone", 20); add("Cover 4 Quarters", 22); add("Cover 6", 10); }
   }
   if (i.safetyDepth === "Mid (8-12 yds)") {
     add("Cover 3 Sky", 18); add("Cover 3 Cloud", 15); add("Cover 3 Buzz", 12); add("Cover 1", 14);
     if (i.safetySpacing === "Rotated strong") { add("Cover 3 Cloud", 20); add("Cover 6", 12); }
-    if (i.safetySpacing === "Rotated weak") { add("Cover 3 Sky", 18); }
+    if (i.safetySpacing === "Rotated weak")   { add("Cover 3 Sky", 18); }
   }
   if (i.safetyDepth === "Shallow (5-7 yds)") {
     add("Cover 1", 18); add("Cover 0", 14); add("Cover 2 Man Under", 16); add("Zero Blitz", 10);
@@ -133,70 +270,46 @@ function computeScores(i: PreSnapInputs): CoverageScore {
     add("Cover 0", 24); add("Zero Blitz", 22); add("Cover 2 Man Under", 12);
   }
 
-  // CB leverage signals
-  if (i.cbLeverage === "Press (0-2 yds)") {
-    add("Cover 0", 18); add("Cover 1", 16); add("Cover 2 Man Under", 14); add("Zero Blitz", 12);
-  }
-  if (i.cbLeverage === "Off-man (3-5 yds)") {
-    add("Cover 1 Robber", 14); add("Man Free", 12); add("Cover 3 Sky", 8); add("Cover 3 Match", 10);
-  }
-  if (i.cbLeverage === "Cushion (7+ yds)") {
-    add("Cover 2 Zone", 16); add("Cover 4 Quarters", 18); add("Cover 3 Sky", 10); add("Cover 3 Cloud", 8);
-  }
-  if (i.cbLeverage === "Inside shade") {
-    add("Cover 1", 16); add("Cover 3 Match", 12); add("Cover 1 Robber", 8);
-  }
-  if (i.cbLeverage === "Outside shade") {
-    add("Cover 2 Zone", 14); add("Cover 2 Tampa", 12); add("Cover 3 Sky", 10);
-  }
+  // ── CB leverage signals ───────────────────────────────────────────────────
+  if (i.cbLeverage === "Press (0-2 yds)")    { add("Cover 0", 18); add("Cover 1", 16); add("Cover 2 Man Under", 14); add("Zero Blitz", 12); }
+  if (i.cbLeverage === "Off-man (3-5 yds)")  { add("Cover 1 Robber", 14); add("Man Free", 12); add("Cover 3 Sky", 8); add("Cover 3 Match", 10); }
+  if (i.cbLeverage === "Cushion (7+ yds)")   { add("Cover 2 Zone", 16); add("Cover 4 Quarters", 18); add("Cover 3 Sky", 10); add("Cover 3 Cloud", 8); }
+  if (i.cbLeverage === "Inside shade")       { add("Cover 1", 16); add("Cover 3 Match", 12); add("Cover 1 Robber", 8); }
+  if (i.cbLeverage === "Outside shade")      { add("Cover 2 Zone", 14); add("Cover 2 Tampa", 12); add("Cover 3 Sky", 10); }
 
-  // Nickel signals
-  if (i.nickelAlignment === "Mugged / walked up") {
-    add("Zero Blitz", 16); add("Cover 0", 12); add("Cover 2 Man Under", 10);
-  }
-  if (i.nickelAlignment === "Blitz look") {
-    add("Zero Blitz", 20); add("Cover 0", 16); add("Cover 1", 8);
-  }
-  if (i.nickelAlignment === "Walked out wide") {
-    add("Cover 4 Palms", 16); add("Cover 2 Zone", 10);
-  }
+  // ── Nickel signals ────────────────────────────────────────────────────────
+  if (i.nickelAlignment === "Mugged / walked up") { add("Zero Blitz", 16); add("Cover 0", 12); add("Cover 2 Man Under", 10); }
+  if (i.nickelAlignment === "Blitz look")         { add("Zero Blitz", 20); add("Cover 0", 16); add("Cover 1", 8); }
+  if (i.nickelAlignment === "Walked out wide")    { add("Cover 4 Palms", 16); add("Cover 2 Zone", 10); }
 
-  // Slot defender signals
-  if (i.slotDefender === "Walked up tight") {
-    add("Cover 0", 14); add("Zero Blitz", 12); add("Cover 1", 10);
-  }
-  if (i.slotDefender === "Playing man") {
-    add("Cover 1", 14); add("Cover 2 Man Under", 12); add("Man Free", 10);
-  }
-  if (i.slotDefender === "Playing zone") {
-    add("Cover 3 Buzz", 16); add("Cover 4 Palms", 12); add("Cover 2 Zone", 10);
-  }
+  // ── Slot defender signals ─────────────────────────────────────────────────
+  if (i.slotDefender === "Walked up tight") { add("Cover 0", 14); add("Zero Blitz", 12); add("Cover 1", 10); }
+  if (i.slotDefender === "Playing man")     { add("Cover 1", 14); add("Cover 2 Man Under", 12); add("Man Free", 10); }
+  if (i.slotDefender === "Playing zone")    { add("Cover 3 Buzz", 16); add("Cover 4 Palms", 12); add("Cover 2 Zone", 10); }
 
-  // LB signals
-  if (i.lbDepth === "Deep (8+ yds)") { add("Cover 3 Buzz", 18); add("Cover 4 Quarters", 10); }
-  if (i.lbDepth === "Normal (4-7 yds)") { add("Cover 3 Sky", 12); add("Cover 2 Zone", 10); add("Cover 1 Robber", 8); }
-  if (i.lbDepth === "Mugged (0-3 yds)") { add("Cover 0", 12); add("Zero Blitz", 14); add("Cover 2 Man Under", 8); }
-  if (i.lbDepth === "A-gap shade") { add("Zero Blitz", 20); add("Cover 0", 14); }
-  if (i.lbSpacing === "Pinched") { add("Zero Blitz", 12); add("Cover 0", 8); }
-  if (i.lbSpacing === "Wide") { add("Cover 4 Quarters", 10); add("Cover 2 Zone", 8); }
+  // ── LB signals ───────────────────────────────────────────────────────────
+  if (i.lbDepth === "Deep (8+ yds)")       { add("Cover 3 Buzz", 18); add("Cover 4 Quarters", 10); }
+  if (i.lbDepth === "Normal (4-7 yds)")    { add("Cover 3 Sky", 12); add("Cover 2 Zone", 10); add("Cover 1 Robber", 8); }
+  if (i.lbDepth === "Mugged (0-3 yds)")    { add("Cover 0", 12); add("Zero Blitz", 14); add("Cover 2 Man Under", 8); }
+  if (i.lbDepth === "A-gap shade")         { add("Zero Blitz", 20); add("Cover 0", 14); }
+  if (i.lbSpacing === "Pinched")           { add("Zero Blitz", 12); add("Cover 0", 8); }
+  if (i.lbSpacing === "Wide")              { add("Cover 4 Quarters", 10); add("Cover 2 Zone", 8); }
 
-  // DL signals
-  if (i.dlAlignment === "Wide (pass rush)") { add("Cover 0", 10); add("Zero Blitz", 10); }
+  // ── DL signals ───────────────────────────────────────────────────────────
+  if (i.dlAlignment === "Wide (pass rush)")      { add("Cover 0", 10); add("Zero Blitz", 10); }
   if (i.dlAlignment === "Over (shifted strong)") { add("Cover 3 Cloud", 10); add("Cover 6", 8); }
 
-  // User position signals
-  if (i.userPosition === "SS") { add("Cover 3 Sky", 12); add("Cover 1", 8); }
-  if (i.userPosition === "FS") { add("Cover 1 Robber", 14); add("Cover 3 Sky", 10); }
-  if (i.userPosition === "LB") { add("Cover 3 Buzz", 12); add("Cover 1", 8); }
-  if (i.userPosition === "CB") { add("Cover 1", 10); add("Cover 0", 8); }
+  // ── User position signal (only when evidence confirmed) ───────────────────
+  // We do NOT score based on userPosition alone — only if evidence was logged externally
+  // via detectUserControlledDefender. This prevents guessing the user.
 
-  // Blitz look
-  if (i.blitzLook === "A-gap shade") { add("Zero Blitz", 18); add("Cover 0", 14); }
-  if (i.blitzLook === "Edge walk-up") { add("Cover 0", 12); add("Zero Blitz", 10); add("Cover 1", 8); }
-  if (i.blitzLook === "DB walked down") { add("Zero Blitz", 16); add("Cover 0", 12); }
-  if (i.blitzLook === "Multiple walk-ups") { add("Zero Blitz", 22); add("Cover 0", 16); }
+  // ── Blitz look ────────────────────────────────────────────────────────────
+  if (i.blitzLook === "A-gap shade")      { add("Zero Blitz", 18); add("Cover 0", 14); }
+  if (i.blitzLook === "Edge walk-up")     { add("Cover 0", 12); add("Zero Blitz", 10); add("Cover 1", 8); }
+  if (i.blitzLook === "DB walked down")   { add("Zero Blitz", 16); add("Cover 0", 12); }
+  if (i.blitzLook === "Multiple walk-ups"){ add("Zero Blitz", 22); add("Cover 0", 16); }
 
-  // Situational boosters
+  // ── Situational boosters ──────────────────────────────────────────────────
   if (i.situationDown === 3 && (i.situationYards ?? 10) >= 7) {
     add("Cover 3 Sky", 10); add("Cover 4 Quarters", 8); add("Zero Blitz", 8);
   }
@@ -209,7 +322,7 @@ function computeScores(i: PreSnapInputs): CoverageScore {
 
 function normalizeToCoverageBreakdown(scores: CoverageScore): CoverageConfidence[] {
   const entries = Object.entries(scores) as [Coverage, number][];
-  const total = entries.reduce((s, [, v]) => s + v, 0);
+  const total   = entries.reduce((s, [, v]) => s + v, 0);
   if (total === 0) return [];
   return entries
     .map(([coverage, pts]) => ({ coverage, confidence: Math.round((pts / total) * 100) }))
@@ -218,14 +331,90 @@ function normalizeToCoverageBreakdown(scores: CoverageScore): CoverageConfidence
     .slice(0, 6);
 }
 
+// ─── Evidence Trail Builder ───────────────────────────────────────────────────
+// Produces a human-readable chain: observable input → what it implies → why.
+
+function buildEvidenceTrail(i: PreSnapInputs, shell: Shell): string[] {
+  const trail: string[] = [];
+
+  // Shell
+  trail.push(`Safety depth (${i.safetyDepth}) + spacing (${i.safetySpacing}) → shell classified as "${shell}"`);
+
+  // Safety depth implications
+  if (i.safetyDepth === "Deep (15+ yds)" && i.safetySpacing === "Split wide") {
+    trail.push("Two high split safeties → Cover 2 / Cover 4 family evidence; single-high coverages penalized");
+  } else if (i.safetyDepth === "Deep (15+ yds)" && i.safetySpacing === "Centerfield") {
+    trail.push("Single high centerfield → Cover 3 / Man Free evidence; Cover 2/4 penalized");
+  } else if (i.safetyDepth === "Mid (8-12 yds)") {
+    trail.push("Mid-depth safety → Cover 3 variant or rolled coverage; ambiguous — watch post-snap rotation");
+  } else if (i.safetyDepth === "In the box") {
+    trail.push("Both safeties near box → strong Cover 0 / Zero Blitz evidence; zone coverages penalized heavily");
+  } else if (i.safetyDepth === "Shallow (5-7 yds)") {
+    trail.push("Shallow safety depth → man / blitz indicators present; zone coverage less likely");
+  }
+
+  // CB leverage
+  if (i.cbLeverage === "Press (0-2 yds)") {
+    trail.push("CB press (0-2 yds) → man coverage indicators increase: Cover 0/1, Zero Blitz, Cover 2 Man Under");
+  } else if (i.cbLeverage === "Cushion (7+ yds)") {
+    trail.push("CB soft cushion (7+ yds) → zone coverage indicators increase: Cover 2/4 family");
+  } else if (i.cbLeverage === "Inside shade") {
+    trail.push("CB inside shade → consistent with Cover 1/Robber man trail technique");
+  } else if (i.cbLeverage === "Outside shade") {
+    trail.push("CB outside shade → Cover 2 or zone protecting deep sideline");
+  } else {
+    trail.push("CB off-man (3-5 yds) → ambiguous; consistent with Cover 1 Robber, Man Free, Cover 3 Match");
+  }
+
+  // LB
+  if (i.lbDepth === "A-gap shade") {
+    trail.push("LB A-gap shade → strongest blitz indicator in the model; Zero Blitz / Cover 0 heavily boosted");
+  } else if (i.lbDepth === "Mugged (0-3 yds)") {
+    trail.push("LB mugged (0-3 yds) → blitz evidence; man coverage elevated; zone penalized");
+  } else if (i.lbDepth === "Deep (8+ yds)") {
+    trail.push("LB dropping to hook/curl depth → Cover 3 Buzz or underneath zone evidence");
+  }
+  if (i.lbSpacing === "Pinched") {
+    trail.push("LB spacing pinched → interior run gap tightened; Zero Blitz indicator");
+  }
+
+  // Nickel
+  if (i.nickelAlignment === "Blitz look") {
+    trail.push("Nickel in blitz look → DB blitz evidence; Zero Blitz / Cover 0 elevated");
+  } else if (i.nickelAlignment === "Mugged / walked up") {
+    trail.push("Nickel mugged/walked up → pressure indicator; man coverage elevated");
+  } else if (i.nickelAlignment === "Walked out wide") {
+    trail.push("Nickel walked wide → slot zone drop pattern; Cover 4 Palms / Cover 2 Zone evidence");
+  }
+
+  // Slot
+  if (i.slotDefender === "Playing man") {
+    trail.push("Slot defender in man trail → man coverage family elevated: Cover 1, Cover 2 Man Under");
+  } else if (i.slotDefender === "Walked up tight") {
+    trail.push("Slot defender walked tight → press / blitz indicator; Cover 0 / Zero Blitz elevated");
+  }
+
+  // Blitz look
+  if (i.blitzLook !== "None") {
+    trail.push(`Blitz look (${i.blitzLook}) → pressure evidence added to all blitz/man coverages`);
+  }
+
+  // Situation
+  if (i.situationDown === 3 && (i.situationYards ?? 10) >= 7) {
+    trail.push("3rd and long → situational adjustment: Cover 3/4 and Zero Blitz elevated");
+  }
+
+  return trail;
+}
+
 // ─── Disguise Detection ───────────────────────────────────────────────────────
 
 function detectDisguises(shell: Shell, inputs: PreSnapInputs): DisguiseFlag[] {
   const flags: DisguiseFlag[] = [];
 
   if (shell === "Two High") {
-    flags.push({ shellShown: "Two High", likelyCoverage: "Cover 3 Sky", probability: 38, indicator: "Late safety rotation — one safety often drops to hook zone post-snap" });
-    flags.push({ shellShown: "Two High", likelyCoverage: "Cover 3 Match", probability: 22, indicator: "CBs in off-man = match coverage disguised as Cover 2 shell" });
+    flags.push({ shellShown: "Two High", likelyCoverage: "Cover 3 Sky",    probability: 38, indicator: "Late safety rotation — one safety often drops to hook zone post-snap" });
+    flags.push({ shellShown: "Two High", likelyCoverage: "Cover 3 Match",  probability: 22, indicator: "CBs in off-man = match coverage disguised as Cover 2 shell" });
     if (inputs.blitzLook !== "None") flags.push({ shellShown: "Two High", likelyCoverage: "Zero Blitz", probability: 45, indicator: "Walk-up blitzers with two high = pressure coming, not zone" });
   }
   if (shell === "Single High") {
@@ -233,7 +422,7 @@ function detectDisguises(shell: Shell, inputs: PreSnapInputs): DisguiseFlag[] {
     if (inputs.lbDepth === "Deep (8+ yds)") flags.push({ shellShown: "Single High", likelyCoverage: "Cover 3 Buzz", probability: 35, indicator: "Deep LB in single-high = hook-curl coverage, not classic Cover 3" });
   }
   if (shell === "Quarters Shell") {
-    flags.push({ shellShown: "Quarters Shell", likelyCoverage: "Cover 3 Buzz", probability: 32, indicator: "Quarters shell with buzzing OLB = Cover 3 underneath disguised as quarters" });
+    flags.push({ shellShown: "Quarters Shell", likelyCoverage: "Cover 3 Buzz",  probability: 32, indicator: "Quarters shell with buzzing OLB = Cover 3 underneath disguised as quarters" });
     flags.push({ shellShown: "Quarters Shell", likelyCoverage: "Cover 4 Palms", probability: 30, indicator: "Palms means CBs will bail to cover seam routes post-snap" });
   }
   if (shell === "Cover 0 Shell") {
@@ -241,7 +430,7 @@ function detectDisguises(shell: Shell, inputs: PreSnapInputs): DisguiseFlag[] {
   }
   if (shell === "Press Shell") {
     flags.push({ shellShown: "Press Shell", likelyCoverage: "Cover 3 Match", probability: 35, indicator: "Trail technique off the press is Cover 3 match — CBs aren't in pure man" });
-    flags.push({ shellShown: "Press Shell", likelyCoverage: "Cover 1", probability: 40, indicator: "Press with single high almost always resolves to Cover 1" });
+    flags.push({ shellShown: "Press Shell", likelyCoverage: "Cover 1",       probability: 40, indicator: "Press with single high almost always resolves to Cover 1" });
   }
 
   return flags.sort((a, b) => b.probability - a.probability).slice(0, 3);
@@ -251,16 +440,16 @@ function detectDisguises(shell: Shell, inputs: PreSnapInputs): DisguiseFlag[] {
 
 function computeBlitzProb(i: PreSnapInputs): number {
   let prob = 5;
-  if (i.blitzLook === "A-gap shade") prob += 40;
-  if (i.blitzLook === "Edge walk-up") prob += 25;
-  if (i.blitzLook === "DB walked down") prob += 35;
+  if (i.blitzLook === "A-gap shade")       prob += 40;
+  if (i.blitzLook === "Edge walk-up")      prob += 25;
+  if (i.blitzLook === "DB walked down")    prob += 35;
   if (i.blitzLook === "Multiple walk-ups") prob += 55;
-  if (i.nickelAlignment === "Blitz look") prob += 25;
-  if (i.nickelAlignment === "Mugged / walked up") prob += 15;
-  if (i.lbDepth === "Mugged (0-3 yds)") prob += 20;
-  if (i.lbDepth === "A-gap shade") prob += 30;
-  if (i.safetyDepth === "In the box") prob += 20;
-  if (i.lbSpacing === "Pinched") prob += 10;
+  if (i.nickelAlignment === "Blitz look")          prob += 25;
+  if (i.nickelAlignment === "Mugged / walked up")  prob += 15;
+  if (i.lbDepth === "Mugged (0-3 yds)")    prob += 20;
+  if (i.lbDepth === "A-gap shade")         prob += 30;
+  if (i.safetyDepth === "In the box")      prob += 20;
+  if (i.lbSpacing === "Pinched")           prob += 10;
   if (i.slotDefender === "Walked up tight") prob += 15;
   return Math.min(prob, 99);
 }
@@ -269,16 +458,45 @@ function computeBlitzProb(i: PreSnapInputs): number {
 
 function describeAdjustmentImpact(adj: DefAdjustment): string {
   const map: Record<DefAdjustment, string> = {
-    "None": "No adjustments detected — base alignment.",
-    "Pinch": "DL pinched inside — run gaps tightened, A/B-gap stuffed. Attack edges or go pass.",
-    "Spread": "DL spread wide — designed to contain outside run. Inside runs may open.",
-    "Press all": "Press across the board — quick game and rub routes attack this hard.",
+    "None":        "No adjustments detected — base alignment.",
+    "Pinch":       "DL pinched inside — run gaps tightened, A/B-gap stuffed. Attack edges or go pass.",
+    "Spread":      "DL spread wide — designed to contain outside run. Inside runs may open.",
+    "Press all":   "Press across the board — quick game and rub routes attack this hard.",
     "Cushion all": "Soft cushion — slants, drags, and quick outs will gain easy yards underneath.",
-    "Shade inside": "CBs inside shade — attack the outside fade and comeback routes.",
-    "Shade outside": "CBs outside shade — attack the slant and post inside.",
-    "Over top": "Over-top coverage — short routes underneath will be open. Check-down available.",
+    "Shade inside":"CBs inside shade — attack the outside fade and comeback routes.",
+    "Shade outside":"CBs outside shade — attack the slant and post inside.",
+    "Over top":    "Over-top coverage — short routes underneath will be open. Check-down available.",
   };
   return map[adj];
+}
+
+// ─── Reasoning Builder ────────────────────────────────────────────────────────
+
+function buildReasoning(i: PreSnapInputs, shell: Shell, top: Coverage, userDetection: UserDetectionResult): string[] {
+  const lines: string[] = [];
+  lines.push(`Shell read: ${shell} — based on safety depth (${i.safetyDepth}) and spacing (${i.safetySpacing}).`);
+  if (i.cbLeverage === "Press (0-2 yds)")  lines.push("CB press technique increases probability of man coverage or Cover 0.");
+  if (i.cbLeverage === "Cushion (7+ yds)") lines.push("CB cushion suggests zone — most likely Cover 2 or Cover 4 variant.");
+  if (i.lbDepth === "Deep (8+ yds)")       lines.push("Deep LB suggests hook-buzz coverage (Cover 3 Buzz) or Quarters underneath.");
+  if (i.lbDepth === "A-gap shade" || i.lbDepth === "Mugged (0-3 yds)") lines.push("Mugged LB — high blitz probability. Prepare a hot route pre-snap.");
+  if (i.nickelAlignment === "Blitz look")  lines.push("Nickel walked down — DB blitz likely. Screen or quick game will punish.");
+  if (i.blitzLook !== "None")              lines.push(`Blitz indicator: ${i.blitzLook} — have a hot route ready before every snap.`);
+
+  if (!userDetection.insufficientEvidence && userDetection.position !== "Unknown") {
+    lines.push(
+      `User-controlled defender confirmed as ${userDetection.position} (${userDetection.confidence} confidence, ${userDetection.confidenceScore}%). ` +
+      `Evidence: ${userDetection.evidenceUsed[0] ?? "direct observation"}. ` +
+      `Design routes that displace them from your primary read.`
+    );
+  } else {
+    lines.push(
+      "User-controlled defender: Unknown — insufficient observable evidence to confirm a position. " +
+      "Cannot adjust routes without confirmation. Report direct evidence to unlock user-displacement recommendations."
+    );
+  }
+
+  lines.push(`Top prediction: ${top}. Attack with the recommended concepts below.`);
+  return lines;
 }
 
 // ─── Attack Recommendations ───────────────────────────────────────────────────
@@ -356,29 +574,12 @@ const ATTACK_MAP: Record<Coverage, AttackRecommendation[]> = {
   ],
 };
 
-// ─── Reasoning Builder ────────────────────────────────────────────────────────
-
-function buildReasoning(i: PreSnapInputs, shell: Shell, top: Coverage): string[] {
-  const lines: string[] = [];
-  lines.push(`Shell read: ${shell} — based on safety depth (${i.safetyDepth}) and spacing (${i.safetySpacing}).`);
-  if (i.cbLeverage === "Press (0-2 yds)") lines.push("CB press technique increases probability of man coverage or Cover 0.");
-  if (i.cbLeverage === "Cushion (7+ yds)") lines.push("CB cushion suggests zone — most likely Cover 2 or Cover 4 variant.");
-  if (i.lbDepth === "Deep (8+ yds)") lines.push("Deep LB suggests hook-buzz coverage (Cover 3 Buzz) or Quarters underneath.");
-  if (i.lbDepth === "A-gap shade" || i.lbDepth === "Mugged (0-3 yds)") lines.push("Mugged LB — high blitz probability. Prepare a hot route pre-snap.");
-  if (i.nickelAlignment === "Blitz look") lines.push("Nickel walked down — DB blitz likely. Screen or quick game will punish.");
-  if (i.blitzLook !== "None") lines.push(`Blitz indicator: ${i.blitzLook} — have a hot route ready before every snap.`);
-  if (i.userPosition !== "None visible") lines.push(`Opponent controlling ${i.userPosition} — design routes that pull the user away from your primary read.`);
-  lines.push(`Top prediction: ${top}. Attack with the recommended concepts below.`);
-  return lines;
-}
-
 // ─── Main Analysis Function ───────────────────────────────────────────────────
 
 export function analyzePreSnap(inputs: PreSnapInputs, historicalBoost?: Partial<Record<Coverage, number>>): PreSnapAnalysis {
   const { shell, confidence: shellConfidence } = detectShell(inputs);
   const scores = computeScores(inputs);
 
-  // Apply historical tendency boost
   if (historicalBoost) {
     for (const [cov, boost] of Object.entries(historicalBoost) as [Coverage, number][]) {
       scores[cov] = (scores[cov] ?? 0) + boost;
@@ -386,23 +587,53 @@ export function analyzePreSnap(inputs: PreSnapInputs, historicalBoost?: Partial<
   }
 
   const breakdown = normalizeToCoverageBreakdown(scores);
-  const top = breakdown[0] ?? { coverage: "Cover 3 Sky" as Coverage, confidence: 50 };
-  const disguises = detectDisguises(shell, inputs);
+  const top    = breakdown[0] ?? { coverage: "Cover 3 Sky" as Coverage, confidence: 30 };
+  const second = breakdown[1];
+
+  // ── Confidence gating ────────────────────────────────────────────────────
+  const isLowConfidence = top.confidence < COVERAGE_MIN_CONFIDENCE;
+  const isAmbiguous     = !!second && (top.confidence - second.confidence) < COVERAGE_AMBIGUITY_GAP;
+
+  let coverageConclusion: CoverageConclusion;
+  if (isLowConfidence) {
+    coverageConclusion = "Unknown";
+  } else if (isAmbiguous) {
+    coverageConclusion = "Multiple Possibilities";
+  } else {
+    coverageConclusion = top.coverage;
+  }
+
+  // ── User detection ───────────────────────────────────────────────────────
+  const userDetection = detectUserControlledDefender({
+    evidenceObserved:   inputs.userEvidence,
+    suspectedPosition:  inputs.userSuspectedPosition,
+    legacyPosition:     inputs.userPosition,
+  });
+
+  // ── Evidence trail ───────────────────────────────────────────────────────
+  const evidenceTrail = buildEvidenceTrail(inputs, shell);
+
+  const disguises        = detectDisguises(shell, inputs);
   const blitzProbability = computeBlitzProb(inputs);
   const adjustmentImpact = describeAdjustmentImpact(inputs.adjustment);
-  const recommendations = ATTACK_MAP[top.coverage] ?? ATTACK_MAP["Cover 3 Sky"];
-  const reasoning = buildReasoning(inputs, shell, top.coverage);
+  const recommendations  = ATTACK_MAP[top.coverage] ?? ATTACK_MAP["Cover 3 Sky"];
+  const reasoning        = buildReasoning(inputs, shell, top.coverage, userDetection);
 
   return {
     shell,
     shellConfidence,
-    topCoverage: top.coverage,
-    topConfidence: top.confidence,
-    coverageBreakdown: breakdown,
+    topCoverage:        top.coverage,
+    topConfidence:      top.confidence,
+    coverageConclusion,
+    isLowConfidence,
+    isAmbiguous,
+    coverageBreakdown:  breakdown,
+    evidenceTrail,
     disguises,
     adjustmentImpact,
     blitzProbability,
     recommendations,
     reasoning,
+    userDetection,
   };
 }

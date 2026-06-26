@@ -15,6 +15,7 @@ import {
   type UserPosition,
   type DefAdjustment,
   type BlitzLook,
+  type UserObservableEvidence,
 } from "@/lib/pre-snap-engine";
 import {
   logResult,
@@ -248,12 +249,75 @@ export function PreSnapPanel() {
                       <Select label="LB Depth" value={inputs.lbDepth} options={LB_DEPTH} onChange={(v) => setField("lbDepth", v)} />
                       <Select label="LB Spacing" value={inputs.lbSpacing} options={LB_SPACING} onChange={(v) => setField("lbSpacing", v)} />
                       <Select label="DL Alignment" value={inputs.dlAlignment} options={DL_ALIGNMENT} onChange={(v) => setField("dlAlignment", v)} />
-                      <Select label="User Position" value={inputs.userPosition} options={USER_POSITION} onChange={(v) => setField("userPosition", v)} />
                       <Select label="Def Adjustment" value={inputs.adjustment} options={DEF_ADJUSTMENT} onChange={(v) => setField("adjustment", v)} />
                     </div>
                     <div className="mt-2">
                       <Select label="Blitz Look" value={inputs.blitzLook} options={BLITZ_LOOK} onChange={(v) => setField("blitzLook", v)} />
                     </div>
+
+                    {/* User Defender Evidence (evidence-based — do not guess) */}
+                    <div className="mt-3 rounded-lg border border-border/40 bg-muted/10 p-3">
+                      <div className="mb-2 text-[9px] font-bold uppercase tracking-widest text-muted-foreground">
+                        User Defender Detection
+                      </div>
+                      <p className="text-[9px] text-muted-foreground/70 mb-2 leading-relaxed">
+                        Only report what you directly observed. Do not guess.
+                      </p>
+                      <div className="flex flex-col gap-1.5 mb-3">
+                        {(
+                          [
+                            { id: "user_icon_visible",   label: "User indicator icon above a defender" },
+                            { id: "manual_presnap_move", label: "Defender repositioned manually before snap" },
+                            { id: "manual_strafing",     label: "Manual strafing / lateral movement observed" },
+                            { id: "manual_rush_path",    label: "Unnatural post-snap rush path (user input)" },
+                            { id: "continuous_input",    label: "Continuous erratic movement pattern" },
+                          ] as { id: UserObservableEvidence; label: string }[]
+                        ).map(({ id, label }) => {
+                          const checked = (inputs.userEvidence ?? []).includes(id);
+                          return (
+                            <label key={id} className="flex items-start gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                className="mt-0.5 accent-blue-400"
+                                onChange={() => {
+                                  const current = (inputs.userEvidence ?? []).filter(e => e !== "none");
+                                  const next = checked
+                                    ? current.filter(e => e !== id)
+                                    : [...current, id];
+                                  setField("userEvidence", next.length === 0 ? ["none"] : next);
+                                  setAnalyzed(false);
+                                }}
+                              />
+                              <span className="text-[10px] text-foreground/80 leading-relaxed">{label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      {(inputs.userEvidence ?? []).some(e => e !== "none") && (
+                        <div className="mt-2">
+                          <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">
+                            Suspected Position (only if evidence supports)
+                          </label>
+                          <select
+                            value={inputs.userSuspectedPosition ?? ""}
+                            onChange={e => {
+                              setField("userSuspectedPosition", e.target.value as UserPosition | "Unknown" || undefined);
+                              setAnalyzed(false);
+                            }}
+                            className="mt-1 w-full rounded-md border border-border/60 bg-background px-2 py-1.5 text-[11px] text-foreground focus:border-team-one focus:outline-none"
+                          >
+                            <option value="">— Not confirmed</option>
+                            <option value="FS">FS — Free Safety</option>
+                            <option value="SS">SS — Strong Safety</option>
+                            <option value="LB">LB — Linebacker</option>
+                            <option value="CB">CB — Cornerback</option>
+                            <option value="Unknown">Unknown — Insufficient evidence</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       <div className="flex flex-col gap-0.5">
                         <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Down</label>
@@ -303,19 +367,94 @@ export function PreSnapPanel() {
                         </div>
                       </div>
 
-                      {/* Top Coverage */}
-                      <div className="rounded-lg border border-team-one/40 bg-team-one/5 p-3">
-                        <div className="mb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Likely Coverage</div>
+                      {/* Coverage Conclusion — gated output */}
+                      <div className={`rounded-lg border p-3 ${
+                        analysis.coverageConclusion === "Unknown"
+                          ? "border-red-500/40 bg-red-500/5"
+                          : analysis.coverageConclusion === "Multiple Possibilities"
+                          ? "border-amber-500/40 bg-amber-500/5"
+                          : "border-team-one/40 bg-team-one/5"
+                      }`}>
+                        <div className="mb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Coverage Conclusion</div>
                         <div className="flex items-center justify-between">
-                          <span className="text-[18px] font-bold text-team-one">{analysis.topCoverage}</span>
-                          <span className="text-[13px] font-bold" style={{ color: confidenceColor(analysis.topConfidence) }}>
-                            {analysis.topConfidence}%
+                          <span className={`text-[16px] font-bold ${
+                            analysis.coverageConclusion === "Unknown"
+                              ? "text-red-400"
+                              : analysis.coverageConclusion === "Multiple Possibilities"
+                              ? "text-amber-400"
+                              : "text-team-one"
+                          }`}>
+                            {analysis.coverageConclusion}
+                          </span>
+                          <span className="text-[11px] font-bold" style={{ color: confidenceColor(analysis.topConfidence) }}>
+                            {analysis.topConfidence}% evidence
                           </span>
                         </div>
+                        {analysis.isLowConfidence && (
+                          <p className="mt-1 text-[9px] text-red-400/80">
+                            Insufficient evidence — too many coverages are equally possible. Log more observable signals.
+                          </p>
+                        )}
+                        {analysis.isAmbiguous && !analysis.isLowConfidence && (
+                          <p className="mt-1 text-[9px] text-amber-400/80">
+                            Gap between top two is &lt;{12}% — monitor post-snap rotation to confirm.
+                          </p>
+                        )}
+                        {!analysis.isLowConfidence && !analysis.isAmbiguous && (
+                          <p className="mt-1 text-[9px] text-team-one/70">
+                            Best guess: {analysis.topCoverage} ({analysis.topConfidence}%)
+                          </p>
+                        )}
                         {tendency && tendency.snaps >= 3 && (
-                          <div className="mt-1 text-[10px] text-team-one/70">
+                          <div className="mt-1 text-[9px] text-muted-foreground">
                             ↑ Boosted by {tendency.snaps} logged snaps vs. {opponent}
                           </div>
+                        )}
+                      </div>
+
+                      {/* User Defender Detection Card */}
+                      <div className={`rounded-lg border p-3 ${
+                        analysis.userDetection.insufficientEvidence
+                          ? "border-border/40 bg-muted/10"
+                          : analysis.userDetection.confidence === "High"
+                          ? "border-green-500/40 bg-green-500/5"
+                          : "border-amber-500/30 bg-amber-500/5"
+                      }`}>
+                        <div className="mb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground">User Defender</div>
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[15px] font-bold ${
+                            analysis.userDetection.position === "Unknown"
+                              ? "text-muted-foreground"
+                              : analysis.userDetection.confidence === "High"
+                              ? "text-green-400"
+                              : "text-amber-400"
+                          }`}>
+                            {analysis.userDetection.position === "Unknown" ? "Unknown" : analysis.userDetection.position}
+                          </span>
+                          <span className={`text-[11px] font-bold uppercase ${
+                            analysis.userDetection.confidence === "High" ? "text-green-400"
+                            : analysis.userDetection.confidence === "Medium" ? "text-amber-400"
+                            : "text-muted-foreground"
+                          }`}>
+                            {analysis.userDetection.confidence} confidence
+                          </span>
+                        </div>
+                        {analysis.userDetection.location && (
+                          <p className="text-[9px] text-muted-foreground mt-0.5">{analysis.userDetection.location}</p>
+                        )}
+                        {analysis.userDetection.evidenceUsed.length > 0 ? (
+                          <ul className="mt-1.5 flex flex-col gap-0.5">
+                            {analysis.userDetection.evidenceUsed.map((e, i) => (
+                              <li key={i} className="text-[9px] text-foreground/60 flex gap-1">
+                                <span className="text-green-400/70 shrink-0">✓</span>
+                                <span>{e}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="mt-1 text-[9px] text-muted-foreground/60">
+                            No evidence logged. Check signals above and re-read.
+                          </p>
                         )}
                       </div>
 
@@ -384,6 +523,19 @@ export function PreSnapPanel() {
                           <p className="text-[10px] text-foreground/80">{analysis.adjustmentImpact}</p>
                         </div>
                       )}
+
+                      {/* Evidence Trail */}
+                      <div className="rounded-lg border border-border/30 bg-muted/10 p-3">
+                        <div className="mb-2 text-[9px] font-bold uppercase tracking-widest text-muted-foreground">Evidence Trail</div>
+                        <ul className="flex flex-col gap-1">
+                          {analysis.evidenceTrail.map((line, i) => (
+                            <li key={i} className="flex gap-2 text-[9px] text-foreground/70">
+                              <span className="text-blue-400/70 shrink-0">▸</span>
+                              <span>{line}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
 
                       {/* Reasoning */}
                       <div className="rounded-lg border border-border/30 bg-muted/10 p-3">
