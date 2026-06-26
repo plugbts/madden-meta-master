@@ -1,6 +1,57 @@
 import { useMemo, useState } from "react";
 import { COVERAGES, type Counter, type Coverage } from "@/lib/madden-data";
-import { NFL_TEAMS, getPackages, type TeamDef, type DefPlay, type DefFormation, type DefPackage } from "@/lib/playbook-data";
+import { NFL_TEAMS, type TeamDef, type DefPlay, type DefFormation, type DefPackage } from "@/lib/playbook-data";
+import { PLAYBOOKS } from "@/lib/full-playbook-data";
+
+// ─── real-data helpers ──────────────────────────────────────────────────────
+
+function playNameToCoverageId(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes("cover 0") || n.includes("zero cover")) return "cover-0";
+  if (n.includes("robber")) return "cover-1";
+  if (n.includes("cover 1 press") || n.includes("press man")) return "cover-1-press";
+  if (n.includes("cover 1") || n.includes("man free") || n.includes("man cover 1")) return "cover-1";
+  if (n.includes("tampa")) return "tampa-2";
+  if (n.includes("cover 2 man") || n.includes("man cover 2")) return "cover-2-man";
+  if (n.includes("cover 2 sink") || (n.includes("sink") && !n.includes("3"))) return "cover-2-sink";
+  if (n.includes("cover 2")) return "cover-2";
+  if (n.includes("cover 3 match") || (n.includes("match") && n.includes("3"))) return "cover-3-match";
+  if (n.includes("cover 3 cloud") || (n.includes("cloud") && n.includes("3"))) return "cover-3-cloud";
+  if (n.includes("cover 3") || n.includes("sky") || n.includes("buzz") || n.includes("seam flat")) return "cover-3";
+  if (n.includes("cover 4") || n.includes("quarters") || n.includes("palms")) return "cover-4";
+  if (n.includes("cover 6")) return "cover-6";
+  if (n.includes("double a") || n.includes("dbl a") || n.includes("double mug")) return "dbl-mug";
+  if (n.includes("zero blitz") || n.includes("all out") || n.includes("blaze")) return "zero-blitz";
+  if (n.includes("bear")) return "bear-blitz";
+  if (n.includes("4 de") || n.includes("4de") || n.includes("4 dl")) return "4de-blitz";
+  return "cover-3"; // default fallback
+}
+
+function isBlitzPlay(name: string): boolean {
+  const n = name.toLowerCase();
+  return n.includes("blitz") || n.includes(" fire") || n.includes("zero") ||
+    n.includes("bear") || n.includes("overload") || n.includes("all out") ||
+    n.includes("heat") || n.includes("blaze") || n.includes("safety blitz") ||
+    n.includes("db fire") || n.includes("zone blitz");
+}
+
+function getTeamDefPackages(teamName: string): DefPackage[] {
+  const slug = teamName.toLowerCase();
+  const defData = PLAYBOOKS[slug]?.defense;
+  if (!defData || Object.keys(defData).length === 0) return [];
+  return Object.entries(defData).map(([pkgName, formations]) => ({
+    name: pkgName,
+    shortName: pkgName.length <= 6 ? pkgName : pkgName.replace(/[\s-].*/g, ""),
+    formations: Object.entries(formations as Record<string, string[]>).map(([formName, plays]) => ({
+      name: formName,
+      plays: plays.map((playName): DefPlay => ({
+        name: playName,
+        coverageId: playNameToCoverageId(playName),
+        isBlitz: isBlitzPlay(playName),
+      })),
+    })),
+  }));
+}
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 const TIER_COLOR: Record<string, string> = {
@@ -35,7 +86,7 @@ export function OffenseLab({ onAddToBot }: { onAddToBot: (label: string, detail:
   const [counterIdx, setCounterIdx] = useState(0);
 
   const packages: DefPackage[] = useMemo(
-    () => (team ? getPackages(team.schemeKey) : []),
+    () => (team ? getTeamDefPackages(team.team) : []),
     [team],
   );
 
